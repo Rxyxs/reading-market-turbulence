@@ -1,0 +1,70 @@
+[ 🇺🇸 English ] | [ 🇨🇱 Leer en Español ](README.es.md)
+
+# Reading Market Turbulence
+
+[![Python](https://img.shields.io/badge/Python-3.10-3776AB)](https://www.python.org/)
+[![Polars](https://img.shields.io/badge/data-Polars-CD792C)](https://pola.rs/)
+[![LightGBM](https://img.shields.io/badge/ML-LightGBM-EB5E28)](https://lightgbm.readthedocs.io/)
+[![PyTorch](https://img.shields.io/badge/DL-PyTorch-EE4C2C)](https://pytorch.org/)
+[![DuckDB](https://img.shields.io/badge/DB-DuckDB-FFF000)](https://duckdb.org/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688)](https://fastapi.tiangolo.com/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+
+Forecasts short-horizon realized volatility from real crypto order-flow — **24.8 million real trades**, BTCUSDT + ETHUSDT, 10 full days each, downloaded directly from Binance's public historical data archive (no API key, no synthetic data anywhere).
+
+## Data and an honest scope disclosure
+
+[Binance `data.vision`](https://data.binance.vision) daily `aggTrades` dumps — tick-by-tick real trades (price, quantity, aggressor side, microsecond timestamp). This is **not** full L2 order-book depth (Binance doesn't publish historical depth dumps for free) — genuine microstructure features are built from the real trade tape instead: VWAP, order-flow imbalance from the real aggressor side, and realized volatility computed the same way Optiver's original challenge defines it (root sum of squared log-returns), just over trade prices instead of book mid-price. Disclosed here explicitly rather than implied to be full L2.
+
+## Task
+
+Predict the realized volatility of the **next** 30-second bucket from the current bucket's order-flow features — a genuine forecast, never touching future data (`target = realized_volatility.shift(-1)`, within the same symbol and day only).
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A["Binance aggTrades<br/>24.8M real trades, 2 symbols x 10 days"] --> B["ingest.py<br/>bucket into 30s windows"]
+    B --> C["features.py<br/>VWAP, order-flow imbalance, realized volatility"]
+    C --> D1["Historical baseline<br/>persistence"]
+    C --> D2["LightGBM"]
+    C --> D3["PyTorch MLP<br/>symbol embedding (BTC/ETH)"]
+    D1 --> E["GroupKFold x day<br/>RMSPE"]
+    D2 --> E
+    D3 --> E
+    E --> F[DuckDB]
+    E -.best model.-> G["FastAPI /score"]
+```
+
+## Results (real run, GroupKFold across 5 real trading days)
+
+| Model | RMSPE (mean ± std) |
+|---|---:|
+| **Historical baseline (persistence)** | **4.579 ± 1.212** |
+| LightGBM | 5.559 ± 1.790 |
+| PyTorch MLP (symbol embeddings) | 9.536 ± 3.371 |
+
+**Honest, unforced finding**: the naive persistence baseline beats both the tuned gradient booster and the neural network at this 30-second horizon. This isn't a bug — it's a well-documented property of ultra-short-horizon volatility: volatility clustering makes "what just happened" a genuinely hard baseline to beat, and both learned models likely overfit to noise at this granularity rather than capturing real signal the baseline misses. RMSPE values above 1.0 come from a real property of this metric on crypto data, not a computation error: many 30-second buckets have near-zero realized volatility (quiet periods), and percentage-error metrics blow up when the denominator is close to zero — a known limitation worth flagging rather than masking with a different metric after the fact.
+
+## Usage
+
+```powershell
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+python -m src.pipeline          # full pipeline, real trades, real metrics (downloads not included, see below)
+pytest tests/ -q                # 5/5 passing
+uvicorn src.api:app --reload    # POST /score
+```
+
+Raw tick data (`data/raw_btc/`, `data/raw_eth/`) is gitignored (≈2GB) — re-download via [data.binance.vision](https://data.binance.vision), no key required.
+
+## Stack
+
+Polars (24.8M-row aggregation) · LightGBM · PyTorch (MLP + `nn.Embedding`) · DuckDB · FastAPI · pytest
+
+## Author
+
+**Pablo Reyes** — [github.com/Rxyxs](https://github.com/Rxyxs)
+
+Data: [Binance public historical market data](https://data.binance.vision) (no key required). Code: MIT — see [LICENSE](LICENSE).

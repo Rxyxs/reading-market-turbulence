@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+outputs/models/*
+!outputs/models/.gitkeep
+outputs/reports/*
+!outputs/reports/.gitkeep
+*.duckdb
+CLAUDE.md
+.claude/
