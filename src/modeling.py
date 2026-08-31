@@ -38,18 +38,41 @@ def train_lightgbm(X_train, y_train) -> LGBMRegressor:
     return model
 
 
+def _make_activation(name: str) -> nn.Module:
+    """Fabrica de funciones de activacion para comparar ReLU/GELU/Swish (SiLU)
+    en la MLP de volatilidad -- ver src/activation_experiment.py."""
+    name = name.lower()
+    if name == "relu":
+        return nn.ReLU()
+    if name == "gelu":
+        return nn.GELU()
+    if name == "swish" or name == "silu":
+        return nn.SiLU()
+    raise ValueError(f"activacion desconocida: {name}")
+
+
+def rmspe_loss(y_pred: torch.Tensor, y_true: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """Loss custom diferenciable que optimiza directamente la metrica de
+    evaluacion (RMSPE) en vez de MSE plano -- coherente con por que se usa
+    RMSPE y no RMSE en src/metrics.py: la volatilidad realizada varia en
+    ordenes de magnitud entre regimenes calmos y turbulentos, y MSE pondera
+    esos regimenes de forma desigual."""
+    return torch.sqrt(torch.mean(((y_true - y_pred) / (y_true + eps)) ** 2))
+
+
 class VolatilityMLP(nn.Module):
     """MLP tabular con embedding de activo -- permite que BTCUSDT/ETHUSDT
     compartan la misma red pero aprendan un offset especifico de regimen de
     volatilidad por activo, en vez de una red por activo."""
 
-    def __init__(self, n_numeric_features: int, n_symbols: int, embedding_dim: int = 4, hidden: tuple[int, ...] = (64, 32)):
+    def __init__(self, n_numeric_features: int, n_symbols: int, embedding_dim: int = 4,
+                 hidden: tuple[int, ...] = (64, 32), activation: str = "relu"):
         super().__init__()
         self.embedding = nn.Embedding(n_symbols, embedding_dim)
         prev = n_numeric_features + embedding_dim
         layers = []
         for h in hidden:
-            layers += [nn.Linear(prev, h), nn.ReLU(), nn.Dropout(0.2)]
+            layers += [nn.Linear(prev, h), _make_activation(activation), nn.Dropout(0.2)]
             prev = h
         layers.append(nn.Linear(prev, 1))
         self.net = nn.Sequential(*layers)
@@ -64,6 +87,7 @@ def train_mlp(
     X_train: np.ndarray, symbols_train: np.ndarray, y_train: np.ndarray,
     X_val: np.ndarray, symbols_val: np.ndarray, y_val: np.ndarray,
     n_symbols: int, epochs: int = 60, batch_size: int = 512, lr: float = 1e-3, patience: int = 8,
+    activation: str = "relu", loss_fn: "nn.Module | None" = None,
 ) -> tuple[VolatilityMLP, StandardScaler]:
     scaler = StandardScaler().fit(X_train)
     Xt = torch.tensor(scaler.transform(X_train), dtype=torch.float32)
@@ -73,9 +97,10 @@ def train_mlp(
     sv = torch.tensor(symbols_val, dtype=torch.long)
     yv = torch.tensor(y_val, dtype=torch.float32)
 
-    model = VolatilityMLP(n_numeric_features=X_train.shape[1], n_symbols=n_symbols)
+    model = VolatilityMLP(n_numeric_features=X_train.shape[1], n_symbols=n_symbols, activation=activation)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
-    loss_fn = nn.MSELoss()
+    if loss_fn is None:
+        loss_fn = nn.MSELoss()
 
     n = Xt.shape[0]
     best_val, best_state, bad = float("inf"), None, 0

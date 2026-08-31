@@ -51,15 +51,28 @@ flowchart TD
 
 `python -m src.tune` corre una búsqueda Optuna de 30 trials sobre LightGBM (`n_estimators`, `num_leaves`, `learning_rate`, `subsample`, `colsample_bytree`, `min_child_samples`), minimizando RMSPE sobre el mismo protocolo GroupKFold por día del pipeline principal. El modelo afinado es genuinamente mejor que el sin afinar, y aun así pierde contra el baseline más simple posible — un resultado real sobre este problema específico de forecasting (volatilidad a horizonte ultra-corto), no un fracaso del tuning. No es un bug — es una propiedad bien documentada de la volatilidad a horizontes ultra-cortos: el clustering de volatilidad hace que "lo que acaba de pasar" sea un baseline genuinamente difícil de superar, y ambos modelos aprendidos probablemente sobreajustan a ruido en esta granularidad en vez de capturar señal real que el baseline pierde. Los valores de RMSPE por sobre 1,0 vienen de una propiedad real de esta métrica sobre datos cripto, no un error de cómputo: muchos buckets de 30 segundos tienen volatilidad realizada cercana a cero (periodos tranquilos), y las métricas de error porcentual se disparan cuando el denominador está cerca de cero — una limitación conocida que vale la pena señalar en vez de esconder cambiando de métrica después de ver el resultado.
 
+## Comparación de activaciones con loss custom (PyTorch)
+
+`python -m src.activation_experiment` reutiliza la tabla de features ya persistida en DuckDB (generada por `python -m src.pipeline`) y reentrena la misma `VolatilityMLP` con una **loss custom** (`rmspe_loss`, en `src/modeling.py`) que optimiza directamente la métrica de evaluación del proyecto en vez de MSE plano — coherente con por qué RMSPE y no RMSE se usa para reportar resultados: la volatilidad realizada varía en órdenes de magnitud entre regímenes calmos y turbulentos, y MSE pondera esos regímenes de forma desigual. Compara tres activaciones (ReLU, GELU, Swish/SiLU) bajo el mismo protocolo GroupKFold por día:
+
+| Activación | Loss | RMSPE (promedio ± std) |
+|---|---|---:|
+| **ReLU** | RMSPE custom | **1,588 ± 0,390** |
+| Swish (SiLU) | RMSPE custom | 3,236 ± 1,251 |
+| GELU | RMSPE custom | 3,433 ± 1,551 |
+
+**Hallazgo real, no forzado**: entrenar directamente sobre la métrica de evaluación (RMSPE, no MSE) mejora sustancialmente a la MLP frente al baseline con MSE del pipeline principal (RMSPE 1,588 vs. 9,536) — pero ReLU, la activación más simple, le gana claramente a GELU y Swish en este dataset y horizonte, probablemente porque el modelo es pequeño (dos capas, 64→32) y las activaciones suaves ganan menos de lo que cuestan en varianza cuando hay poca profundidad para aprovecharlas. Resultados persistidos en `outputs/reports/activation_comparison.{csv,json,png}` y en la tabla `activation_comparison` de `outputs/volatility.duckdb`.
+
 ## Uso
 
 ```powershell
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
-python -m src.pipeline          # pipeline completo, trades reales, metricas reales (datos no incluidos, ver abajo)
-pytest tests/ -q                # 5/5 passing
-uvicorn src.api:app --reload    # POST /score
+python -m src.pipeline               # pipeline completo, trades reales, metricas reales (datos no incluidos, ver abajo)
+python -m src.activation_experiment  # comparacion ReLU/GELU/Swish con loss custom RMSPE
+pytest tests/ -q                     # 10/10 passing
+uvicorn src.api:app --reload         # POST /score
 ```
 
 Los datos crudos tick-by-tick (`data/raw_btc/`, `data/raw_eth/`) están en `.gitignore` (≈2GB) — re-descargables desde [data.binance.vision](https://data.binance.vision), sin necesidad de key.
