@@ -8,5 +8,3 @@ outputs/models/*
 outputs/reports/*
 !outputs/reports/.gitkeep
 *.duckdb
-CLAUDE.md
-.claude/
