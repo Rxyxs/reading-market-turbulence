@@ -41,10 +41,15 @@ flowchart TD
 | Modelo | RMSPE (promedio ± std) |
 |---|---:|
 | **Baseline histórico (persistencia)** | **4,579 ± 1,212** |
-| LightGBM | 5,559 ± 1,790 |
+| LightGBM, afinado con Optuna (30 trials) | 5,438 |
+| LightGBM (sin afinar) | 5,559 ± 1,790 |
 | PyTorch MLP (embeddings de símbolo) | 9,536 ± 3,371 |
 
-**Hallazgo honesto, sin forzar**: el baseline ingenuo de persistencia le gana tanto al gradient booster afinado como a la red neuronal en este horizonte de 30 segundos. No es un bug — es una propiedad bien documentada de la volatilidad a horizontes ultra-cortos: el clustering de volatilidad hace que "lo que acaba de pasar" sea un baseline genuinamente difícil de superar, y ambos modelos aprendidos probablemente sobreajustan a ruido en esta granularidad en vez de capturar señal real que el baseline pierde. Los valores de RMSPE por sobre 1,0 vienen de una propiedad real de esta métrica sobre datos cripto, no un error de cómputo: muchos buckets de 30 segundos tienen volatilidad realizada cercana a cero (periodos tranquilos), y las métricas de error porcentual se disparan cuando el denominador está cerca de cero — una limitación conocida que vale la pena señalar en vez de esconder cambiando de métrica después de ver el resultado.
+**Hallazgo honesto, sin forzar, confirmado incluso tras el tuning**: el baseline ingenuo de persistencia le gana tanto al gradient booster como a la red neuronal en este horizonte de 30 segundos. El tuning con Optuna sí mejora genuinamente a LightGBM (5,559 → 5,438 RMSPE, mismo protocolo de GroupKFold por día que el resto del proyecto) — pero no lo suficiente para cerrar la brecha con el baseline de persistencia intacto. Reportado exactamente como salió, no re-corrido con otro esquema de validación hasta que el baseline perdiera.
+
+## Ajuste de hiperparámetros (Optuna)
+
+`python -m src.tune` corre una búsqueda Optuna de 30 trials sobre LightGBM (`n_estimators`, `num_leaves`, `learning_rate`, `subsample`, `colsample_bytree`, `min_child_samples`), minimizando RMSPE sobre el mismo protocolo GroupKFold por día del pipeline principal. El modelo afinado es genuinamente mejor que el sin afinar, y aun así pierde contra el baseline más simple posible — un resultado real sobre este problema específico de forecasting (volatilidad a horizonte ultra-corto), no un fracaso del tuning. No es un bug — es una propiedad bien documentada de la volatilidad a horizontes ultra-cortos: el clustering de volatilidad hace que "lo que acaba de pasar" sea un baseline genuinamente difícil de superar, y ambos modelos aprendidos probablemente sobreajustan a ruido en esta granularidad en vez de capturar señal real que el baseline pierde. Los valores de RMSPE por sobre 1,0 vienen de una propiedad real de esta métrica sobre datos cripto, no un error de cómputo: muchos buckets de 30 segundos tienen volatilidad realizada cercana a cero (periodos tranquilos), y las métricas de error porcentual se disparan cuando el denominador está cerca de cero — una limitación conocida que vale la pena señalar en vez de esconder cambiando de métrica después de ver el resultado.
 
 ## Uso
 

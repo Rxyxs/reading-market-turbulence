@@ -17,3 +17,4 @@ jupyter>=1.0.0
 nbformat>=5.9.0
 nbconvert>=7.16.0
 ipykernel>=6.29.0
+optuna>=3.6.0

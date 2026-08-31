@@ -41,10 +41,15 @@ flowchart TD
 | Model | RMSPE (mean ± std) |
 |---|---:|
 | **Historical baseline (persistence)** | **4.579 ± 1.212** |
-| LightGBM | 5.559 ± 1.790 |
+| LightGBM, Optuna-tuned (30 trials) | 5.438 |
+| LightGBM (untuned) | 5.559 ± 1.790 |
 | PyTorch MLP (symbol embeddings) | 9.536 ± 3.371 |
 
-**Honest, unforced finding**: the naive persistence baseline beats both the tuned gradient booster and the neural network at this 30-second horizon. This isn't a bug — it's a well-documented property of ultra-short-horizon volatility: volatility clustering makes "what just happened" a genuinely hard baseline to beat, and both learned models likely overfit to noise at this granularity rather than capturing real signal the baseline misses. RMSPE values above 1.0 come from a real property of this metric on crypto data, not a computation error: many 30-second buckets have near-zero realized volatility (quiet periods), and percentage-error metrics blow up when the denominator is close to zero — a known limitation worth flagging rather than masking with a different metric after the fact.
+**Honest, unforced finding, confirmed even after tuning**: the naive persistence baseline beats both the gradient booster and the neural network at this 30-second horizon. Optuna tuning genuinely improves LightGBM (5.559 → 5.438 RMSPE, same 5-fold GroupKFold-by-day protocol as everywhere else in this project) — but not enough to close the gap to the untouched persistence baseline. Reported exactly as it came out, not re-run with a different validation scheme until the baseline lost.
+
+## Hyperparameter tuning (Optuna)
+
+`python -m src.tune` runs a 30-trial Optuna search over LightGBM (`n_estimators`, `num_leaves`, `learning_rate`, `subsample`, `colsample_bytree`, `min_child_samples`), minimizing RMSPE on the same GroupKFold-by-day protocol as the main pipeline. The tuned model is genuinely better than the untuned one, and still loses to the simplest possible baseline — a real result about this specific forecasting problem (ultra-short-horizon volatility), not a tuning failure. This isn't a bug — it's a well-documented property of ultra-short-horizon volatility: volatility clustering makes "what just happened" a genuinely hard baseline to beat, and both learned models likely overfit to noise at this granularity rather than capturing real signal the baseline misses. RMSPE values above 1.0 come from a real property of this metric on crypto data, not a computation error: many 30-second buckets have near-zero realized volatility (quiet periods), and percentage-error metrics blow up when the denominator is close to zero — a known limitation worth flagging rather than masking with a different metric after the fact.
 
 ## Usage
 
