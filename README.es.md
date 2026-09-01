@@ -22,6 +22,9 @@ Predice la volatilidad realizada a corto plazo desde flujo de órdenes real de c
 
 Predecir la volatilidad realizada del **siguiente** bucket de 30 segundos a partir de las features de flujo de órdenes del bucket actual — un forecast genuino, sin tocar nunca datos futuros (`target = realized_volatility.shift(-1)`, solo dentro del mismo símbolo y día).
 
+![Precio y volatilidad realizada en la ventana de muestra](outputs/reports/price_and_volatility.png)
+![Desequilibrio de flujo de órdenes vs. volatilidad realizada futura](outputs/reports/ofi_vs_future_vol.png)
+
 ## Arquitectura
 
 ```mermaid
@@ -49,6 +52,8 @@ flowchart TD
 
 **Hallazgo honesto, sin forzar, confirmado incluso tras el tuning**: el baseline ingenuo de persistencia le gana tanto al gradient booster como a la red neuronal en este horizonte de 30 segundos. El tuning con Optuna sí mejora genuinamente a LightGBM (5,559 → 5,438 RMSPE, mismo protocolo de GroupKFold por día que el resto del proyecto) — pero no lo suficiente para cerrar la brecha con el baseline de persistencia intacto. Reportado exactamente como salió, no re-corrido con otro esquema de validación hasta que el baseline perdiera.
 
+![Comparación de RMSPE entre modelos](outputs/reports/rmspe_comparison.png)
+
 ## Ajuste de hiperparámetros (Optuna)
 
 `python -m src.tune` corre una búsqueda Optuna de 30 trials sobre LightGBM (`n_estimators`, `num_leaves`, `learning_rate`, `subsample`, `colsample_bytree`, `min_child_samples`), minimizando RMSPE sobre el mismo protocolo GroupKFold por día del pipeline principal. El modelo afinado es genuinamente mejor que el sin afinar, y aun así pierde contra el baseline más simple posible — un resultado real sobre este problema específico de forecasting (volatilidad a horizonte ultra-corto), no un fracaso del tuning. No es un bug — es una propiedad bien documentada de la volatilidad a horizontes ultra-cortos: el clustering de volatilidad hace que "lo que acaba de pasar" sea un baseline genuinamente difícil de superar, y ambos modelos aprendidos probablemente sobreajustan a ruido en esta granularidad en vez de capturar señal real que el baseline pierde. Los valores de RMSPE por sobre 1,0 vienen de una propiedad real de esta métrica sobre datos cripto, no un error de cómputo: muchos buckets de 30 segundos tienen volatilidad realizada cercana a cero (periodos tranquilos), y las métricas de error porcentual se disparan cuando el denominador está cerca de cero — una limitación conocida que vale la pena señalar en vez de esconder cambiando de métrica después de ver el resultado.
@@ -64,6 +69,8 @@ flowchart TD
 | GELU | RMSPE custom | 3,433 ± 1,551 |
 
 **Hallazgo real, no forzado**: entrenar directamente sobre la métrica de evaluación (RMSPE, no MSE) mejora sustancialmente a la MLP frente al baseline con MSE del pipeline principal (RMSPE 1,588 vs. 9,536) — pero ReLU, la activación más simple, le gana claramente a GELU y Swish en este dataset y horizonte, probablemente porque el modelo es pequeño (dos capas, 64→32) y las activaciones suaves ganan menos de lo que cuestan en varianza cuando hay poca profundidad para aprovecharlas. Resultados persistidos en `outputs/reports/activation_comparison.{csv,json,png}` y en la tabla `activation_comparison` de `outputs/volatility.duckdb`.
+
+![Comparación de activaciones (ReLU vs. GELU vs. Swish)](outputs/reports/activation_comparison.png)
 
 ## Agregador de streaming en tiempo real, en Go
 

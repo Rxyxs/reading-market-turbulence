@@ -7,4 +7,5 @@ outputs/models/*
 !outputs/models/.gitkeep
 outputs/reports/*
 !outputs/reports/.gitkeep
+!outputs/reports/*.png
 *.duckdb
