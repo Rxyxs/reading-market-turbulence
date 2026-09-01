@@ -8,4 +8,5 @@ outputs/models/*
 outputs/reports/*
 !outputs/reports/.gitkeep
 !outputs/reports/*.png
+!outputs/reports/*.gif
 *.duckdb
