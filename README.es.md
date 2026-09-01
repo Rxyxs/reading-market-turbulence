@@ -91,6 +91,15 @@ uvicorn src.api:app --reload         # POST /score
 
 Los datos crudos tick-by-tick (`data/raw_btc/`, `data/raw_eth/`) están en `.gitignore` (≈2GB) — re-descargables desde [data.binance.vision](https://data.binance.vision), sin necesidad de key.
 
+### Docker
+
+```powershell
+docker build -t volatility-api .
+docker run -p 8000:8000 volatility-api
+```
+
+**Nota honesta de alcance**: el pipeline de investigación completo entrena sobre 24,8M trades (~2GB de descarga) — poco práctico para un build de Docker rutinario, así que la imagen entrena sobre 1 día real de BTCUSDT (~1,6M trades) en vez del set completo de 10 días×2 símbolos, divulgado explícitamente en vez de escondido. **También honesto**: este `Dockerfile` está escrito y revisado cuidadosamente pero **aún no verificado con un build real** — Docker Desktop necesitó un reinicio de Windows para terminar su configuración de WSL2 en esta máquina, que no ocurrió antes de escribir esto. No lo tomes como probado hasta que esta nota se elimine.
+
 ## Stack
 
 Polars (agregación de 24,8M filas) · LightGBM · PyTorch (MLP + `nn.Embedding`) · DuckDB · FastAPI · pytest · **Go** (agregador de ticks en streaming, 3,26M trades/seg)
