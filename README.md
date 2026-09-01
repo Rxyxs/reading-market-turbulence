@@ -2,6 +2,7 @@
 
 # Reading Market Turbulence
 
+[![tests](https://github.com/Rxyxs/reading-market-turbulence/actions/workflows/tests.yml/badge.svg)](https://github.com/Rxyxs/reading-market-turbulence/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/badge/Python-3.10-3776AB)](https://www.python.org/)
 [![Polars](https://img.shields.io/badge/data-Polars-CD792C)](https://pola.rs/)
 [![LightGBM](https://img.shields.io/badge/ML-LightGBM-EB5E28)](https://lightgbm.readthedocs.io/)
