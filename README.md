@@ -8,6 +8,7 @@
 [![PyTorch](https://img.shields.io/badge/DL-PyTorch-EE4C2C)](https://pytorch.org/)
 [![DuckDB](https://img.shields.io/badge/DB-DuckDB-FFF000)](https://duckdb.org/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688)](https://fastapi.tiangolo.com/)
+[![Go](https://img.shields.io/badge/Go-streaming%20aggregator-00ADD8?logo=go&logoColor=white)](go/streamer.go)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
 Forecasts short-horizon realized volatility from real crypto order-flow — **24.8 million real trades**, BTCUSDT + ETHUSDT, 10 full days each, downloaded directly from Binance's public historical data archive (no API key, no synthetic data anywhere).
@@ -63,6 +64,18 @@ flowchart TD
 
 **Real, unforced finding**: training directly on the evaluation metric (RMSPE, not MSE) substantially improves the MLP over the main pipeline's MSE-trained baseline (RMSPE 1.588 vs. 9.536) — but ReLU, the simplest activation, clearly beats GELU and Swish on this dataset and horizon, likely because the network is small (two layers, 64→32) and smooth activations gain less than they cost in variance when there isn't much depth to exploit them. Results persisted to `outputs/reports/activation_comparison.{csv,json,png}` and to the `activation_comparison` table in `outputs/volatility.duckdb`.
 
+## Real-time streaming aggregator in Go
+
+Polars loads and aggregates the full 24.8M-row dataset in memory — the right tool for offline research, but not what a real-time market-data gateway looks like in production (Go is a common real choice there, for its concurrency model and low memory footprint versus loading a full DataFrame). `go/streamer.go` reads a real day of raw Binance ticks (BTCUSDT, 2026-08-25, 1,620,679 real trades) **line by line** via `bufio`/`encoding/csv` — never holding the whole file in memory — bucketing into the same 30-second windows and computing the same VWAP / order-flow-imbalance / realized-volatility formulas as `features.py`.
+
+Verified against the real Python/Polars output for the same day: of the 2,879 comparable buckets, **max difference across all three features is ≤2.14×10⁻⁹** (VWAP), essentially floating-point noise — OFI and realized volatility matched to 10⁻¹⁴. Benchmark: **1,620,679 real trades processed in 0.50s — 3.26 million trades/second**, single-threaded, no framework.
+
+```powershell
+python -m src.export_for_go   # regenerates go/python_reference.csv
+cd go
+go run streamer.go
+```
+
 ## Usage
 
 ```powershell
@@ -79,7 +92,7 @@ Raw tick data (`data/raw_btc/`, `data/raw_eth/`) is gitignored (≈2GB) — re-d
 
 ## Stack
 
-Polars (24.8M-row aggregation) · LightGBM · PyTorch (MLP + `nn.Embedding`) · DuckDB · FastAPI · pytest
+Polars (24.8M-row aggregation) · LightGBM · PyTorch (MLP + `nn.Embedding`) · DuckDB · FastAPI · pytest · **Go** (streaming tick aggregator, 3.26M trades/sec)
 
 ## Author
 
