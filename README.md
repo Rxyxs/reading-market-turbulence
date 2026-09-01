@@ -22,6 +22,9 @@ Forecasts short-horizon realized volatility from real crypto order-flow — **24
 
 Predict the realized volatility of the **next** 30-second bucket from the current bucket's order-flow features — a genuine forecast, never touching future data (`target = realized_volatility.shift(-1)`, within the same symbol and day only).
 
+Animated version below traces VWAP and realized volatility bucket-by-bucket across the same 2026-08-25 BTCUSDT session; the static PNG underneath is the one to read closely.
+
+![Price and realized volatility, animated](outputs/reports/price_and_volatility_animated.gif)
 ![Price and realized volatility over the sample window](outputs/reports/price_and_volatility.png)
 ![Order-flow imbalance vs. next-bucket realized volatility](outputs/reports/ofi_vs_future_vol.png)
 

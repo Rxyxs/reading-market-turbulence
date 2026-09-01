@@ -22,6 +22,9 @@ Predice la volatilidad realizada a corto plazo desde flujo de órdenes real de c
 
 Predecir la volatilidad realizada del **siguiente** bucket de 30 segundos a partir de las features de flujo de órdenes del bucket actual — un forecast genuino, sin tocar nunca datos futuros (`target = realized_volatility.shift(-1)`, solo dentro del mismo símbolo y día).
 
+La versión animada de abajo traza el VWAP y la volatilidad realizada bucket a bucket sobre la misma sesión BTCUSDT del 2026-08-25; el PNG estático de abajo es el que conviene leer con detalle.
+
+![Precio y volatilidad realizada, animado](outputs/reports/price_and_volatility_animated.gif)
 ![Precio y volatilidad realizada en la ventana de muestra](outputs/reports/price_and_volatility.png)
 ![Desequilibrio de flujo de órdenes vs. volatilidad realizada futura](outputs/reports/ofi_vs_future_vol.png)
 
