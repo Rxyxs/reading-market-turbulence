@@ -28,6 +28,26 @@ La versión animada de abajo traza el VWAP y la volatilidad realizada bucket a b
 ![Precio y volatilidad realizada en la ventana de muestra](outputs/reports/price_and_volatility.png)
 ![Desequilibrio de flujo de órdenes vs. volatilidad realizada futura](outputs/reports/ofi_vs_future_vol.png)
 
+## Por qué este problema
+
+La volatilidad realizada en los próximos segundos a minutos es el número alrededor del cual un market-maker realmente cotiza: define qué tan ancho poner una quote, cuánto tamaño mostrar, y cuándo retirarse del libro. No se puede observar directamente por adelantado — hay que pronosticarla a partir de lo que el flujo de órdenes está haciendo *ahora mismo*. Esa es la tarea acá: dado el flujo de órdenes del bucket actual de 30 segundos, pronosticar la volatilidad realizada del **siguiente** bucket, sin tocar nunca datos futuros. Deliberadamente no es "predecir el próximo precio" (un problema mucho más difícil, casi impronosticable) — la volatilidad realizada es una cantidad de segundo momento, más tratable de modelar y más cercana a lo que realmente consumen los sistemas de riesgo y market-making.
+
+## Técnicas
+
+| Componente | Qué es | Por qué |
+|---|---|---|
+| **VWAP** (precio promedio ponderado por volumen) | `Σ(precio × cantidad) / Σ(cantidad)` por bucket de 30s | Un resumen de precio robusto al volumen, menos ruidoso que el precio del último trade |
+| **OFI** (desbalance de flujo de órdenes) | `(volumen_compra_taker − volumen_venta_taker) / volumen_total`, desde el lado agresor real (`is_buyer_maker`) | La señal de microestructura genuina — captura presión direccional que una serie de precio pura esconde |
+| **Volatilidad realizada** | Raíz de la suma de retornos log al cuadrado de los precios de trade dentro del bucket (la misma definición de Optiver, aplicada a ticks de trade en vez de mid-price de libro) | La cantidad objetivo en sí misma, y — rezagada un bucket — su propio mejor predictor (ver baseline abajo) |
+| Rango de precio %, retorno del bucket, `n_trades`, volumen en dólares/total, volumen taker compra/venta | Agregados secundarios por bucket | Contexto de microestructura extra alimentado a los modelos de árbol y red junto a VWAP/OFI/vol. realizada |
+| **Baseline histórico (persistencia)** | `predicho = volatilidad_realizada del bucket actual` | El forecast más simple posible — el que todo modelo acá debe superar |
+| **LightGBM** | Árboles gradient-boosted, `n_estimators=400`, afinado además con una búsqueda **Optuna** de 30 trials | Baseline tabular estándar, rápido de entrenar y de afinar |
+| **PyTorch MLP con embeddings** | MLP de 2 capas (64→32) sobre las features numéricas, concatenada con un lookup `nn.Embedding(n_simbolos, 4)` | El embedding permite que BTC/ETH compartan una red mientras aprenden un offset de régimen de volatilidad por activo, en vez de entrenar un modelo separado por símbolo |
+| **Loss RMSPE custom** | `rmspe_loss` en `src/modeling.py`, backprop directo en vez de MSE | Entrena la MLP sobre la misma métrica con la que se evalúa — la volatilidad realizada varía en órdenes de magnitud entre regímenes calmos y turbulentos, que MSE pondera de forma desigual |
+| **DuckDB** | Base de datos analítica embebida | Persiste la tabla de features y cada corrida de comparación de modelos (`outputs/volatility.duckdb`) para consultar después sin re-correr el pipeline |
+| **FastAPI** | `POST /score` | Sirve el mejor modelo (LightGBM) para un vector de features, la forma en que lo llamaría un consumidor en tiempo real |
+| **Agregador de streaming en Go** | `go/streamer.go` | Recómputo línea por línea, memoria constante, de VWAP/OFI/vol. realizada, verificado contra la salida de Python/Polars (ver abajo) |
+
 ## Arquitectura
 
 ```mermaid
@@ -74,6 +94,21 @@ flowchart TD
 **Hallazgo real, no forzado**: entrenar directamente sobre la métrica de evaluación (RMSPE, no MSE) mejora sustancialmente a la MLP frente al baseline con MSE del pipeline principal (RMSPE 1,588 vs. 9,536) — pero ReLU, la activación más simple, le gana claramente a GELU y Swish en este dataset y horizonte, probablemente porque el modelo es pequeño (dos capas, 64→32) y las activaciones suaves ganan menos de lo que cuestan en varianza cuando hay poca profundidad para aprovecharlas. Resultados persistidos en `outputs/reports/activation_comparison.{csv,json,png}` y en la tabla `activation_comparison` de `outputs/volatility.duckdb`.
 
 ![Comparación de activaciones (ReLU vs. GELU vs. Swish)](outputs/reports/activation_comparison.png)
+
+## Corrida de confirmación fresca (datos reales, re-ejecutada hoy)
+
+La tabla de resultados de arriba y sus PNGs vienen de la corrida original ya comprometida en el repo (10 días reales de mercado × BTCUSDT + ETHUSDT, 24,8M trades) y se reportan tal cual, sin re-correrlas para esta actualización. Para validar que el pipeline y su hallazgo se sostienen de forma independiente, se usaron **5 días reales adicionales de BTCUSDT (2026-08-21 a 2026-08-25, 7.562.438 trades reales, descargados hoy mismo desde `data.binance.vision` y re-ejecutados de punta a punta)** para reentrenar LightGBM y evaluarlo sobre el día más reciente (2026-08-25) como un holdout genuino, nunca visto en entrenamiento:
+
+| Corrida | Alcance | RMSPE en holdout (LightGBM) |
+|---|---|---:|
+| Corrida de confirmación fresca (hoy) | 4 días entrenamiento → 1 día real held-out, solo BTCUSDT, 14.395 buckets | **7,361** |
+
+El baseline histórico de persistencia sigue ganando también en esta porción fresca (RMSPE promedio 4,729 ± 1,926 sobre el mismo protocolo GroupKFold por día de 5 folds, vs. 7,096 ± 3,366 de LightGBM) — el mismo hallazgo honesto de la corrida original, sosteniéndose sobre datos descargados de forma independiente. Números crudos: `outputs/reports/model_metrics.csv` y `outputs/reports/fresh_holdout_summary.json`.
+
+![Volatilidad realizada predicha vs. real, día held-out, corrida fresca](outputs/reports/predicted_vs_actual.png)
+![Importancia de features de LightGBM, corrida fresca](outputs/reports/feature_importance.png)
+
+**Interactivo**: volatilidad realizada real vs. predicha del siguiente bucket sobre el día held-out, con VWAP superpuesto — [abrir el gráfico interactivo](https://htmlpreview.github.io/?https://github.com/Rxyxs/reading-market-turbulence/blob/main/outputs/interactive/volatility_forecast.html) (HTML autocontenido, Plotly, pan/zoom/hover).
 
 ## Agregador de streaming en tiempo real, en Go
 

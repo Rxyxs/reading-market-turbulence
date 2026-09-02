@@ -28,6 +28,26 @@ Animated version below traces VWAP and realized volatility bucket-by-bucket acro
 ![Price and realized volatility over the sample window](outputs/reports/price_and_volatility.png)
 ![Order-flow imbalance vs. next-bucket realized volatility](outputs/reports/ofi_vs_future_vol.png)
 
+## Why this problem
+
+Realized volatility over the next few seconds to minutes is the number a market-maker actually prices around: it drives how wide to set a quote, how much size to show, and when to pull off the book entirely. It cannot be observed directly ahead of time — it has to be forecast from what the order flow is doing *right now*. That is the task here: given the trade-flow features of the current 30-second bucket, forecast the realized volatility of the **next** bucket, never touching future data. It is deliberately not "predict the next price" (a much harder, close-to-unforecastable problem) — realized volatility is a second-moment quantity that is both more tractable to model and closer to what risk and market-making systems actually consume.
+
+## Techniques
+
+| Component | What it is | Why |
+|---|---|---|
+| **VWAP** (volume-weighted average price) | `Σ(price × qty) / Σ(qty)` per 30s bucket | A volume-robust price summary per bucket, less noisy than last-trade price |
+| **OFI** (order-flow imbalance) | `(taker_buy_volume − taker_sell_volume) / total_volume` from the real aggressor side (`is_buyer_maker`) | The genuine microstructure signal — captures directional pressure a pure price series hides |
+| **Realized volatility** | Root sum of squared log-returns of trade prices within the bucket (Optiver's own definition, applied to trade ticks instead of book mid-price) | The target quantity itself, and — lagged by one bucket — its own best predictor (see baseline below) |
+| Price range %, bucket return, `n_trades`, dollar/total volume, taker buy/sell volume | Secondary per-bucket aggregates | Extra microstructure context fed to the tree and neural models alongside VWAP/OFI/realized vol |
+| **Historical baseline (persistence)** | `predicted = current bucket's realized_volatility` | The simplest possible forecast — the one every model here has to beat |
+| **LightGBM** | Gradient-boosted trees, `n_estimators=400`, tuned further with a 30-trial **Optuna** search | Standard tabular baseline, fast to train and to tune |
+| **PyTorch MLP with embeddings** | 2-layer MLP (64→32) over the numeric features, concatenated with an `nn.Embedding(n_symbols, 4)` lookup | The embedding lets BTC/ETH share one network while learning a per-asset volatility-regime offset, instead of training a separate model per symbol |
+| **Custom RMSPE loss** | `rmspe_loss` in `src/modeling.py`, backprop'd directly instead of MSE | Trains the MLP on the same metric it's scored on — realized volatility spans orders of magnitude between calm and turbulent regimes, which MSE weights unevenly |
+| **DuckDB** | Embedded analytical database | Persists the engineered feature table and every model-comparison run (`outputs/volatility.duckdb`) for later querying without re-running the pipeline |
+| **FastAPI** | `POST /score` | Serves the best model (LightGBM) for a single feature vector, the shape a real-time consumer would call |
+| **Go streaming aggregator** | `go/streamer.go` | Line-by-line, constant-memory recomputation of VWAP/OFI/realized vol, verified against the Python/Polars output (see below) |
+
 ## Architecture
 
 ```mermaid
@@ -74,6 +94,21 @@ flowchart TD
 **Real, unforced finding**: training directly on the evaluation metric (RMSPE, not MSE) substantially improves the MLP over the main pipeline's MSE-trained baseline (RMSPE 1.588 vs. 9.536) — but ReLU, the simplest activation, clearly beats GELU and Swish on this dataset and horizon, likely because the network is small (two layers, 64→32) and smooth activations gain less than they cost in variance when there isn't much depth to exploit them. Results persisted to `outputs/reports/activation_comparison.{csv,json,png}` and to the `activation_comparison` table in `outputs/volatility.duckdb`.
 
 ![Activation comparison (ReLU vs. GELU vs. Swish)](outputs/reports/activation_comparison.png)
+
+## Fresh confirmation run (real data, re-executed today)
+
+The results table above and its PNGs come from the project's original committed run (10 real trading days × BTCUSDT + ETHUSDT, 24.8M trades) and are reported as-is, not re-run for this update. To validate that the pipeline and its finding hold up independently, **5 more real trading days of BTCUSDT (2026-08-21 to 2026-08-25, 7,562,438 real trades, freshly downloaded from `data.binance.vision` and re-run end to end today)** were used to retrain LightGBM and evaluate it on the most recent day (2026-08-25) as a genuine, never-seen-in-training holdout:
+
+| Run | Scope | Held-out RMSPE (LightGBM) |
+|---|---|---:|
+| Fresh confirmation run (today) | 4 days train → 1 real day held out, BTCUSDT only, 14,395 buckets | **7.361** |
+
+The historical-persistence baseline still leads on this fresh slice too (mean RMSPE 4.729 ± 1.926 across the same 5-fold GroupKFold-by-day protocol, vs. 7.096 ± 3.366 for LightGBM) — the same honest finding as the original run, holding up on independently downloaded data. Raw numbers: `outputs/reports/model_metrics.csv` and `outputs/reports/fresh_holdout_summary.json`.
+
+![Predicted vs. actual realized volatility, held-out day, fresh run](outputs/reports/predicted_vs_actual.png)
+![LightGBM feature importance, fresh run](outputs/reports/feature_importance.png)
+
+**Interactive**: actual vs. predicted next-bucket realized volatility over the held-out day, with VWAP overlaid — [open the interactive chart](https://htmlpreview.github.io/?https://github.com/Rxyxs/reading-market-turbulence/blob/main/outputs/interactive/volatility_forecast.html) (self-contained HTML, Plotly, pan/zoom/hover).
 
 ## Real-time streaming aggregator in Go
 

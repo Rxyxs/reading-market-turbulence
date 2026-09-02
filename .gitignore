@@ -10,3 +10,5 @@ outputs/reports/*
 !outputs/reports/*.png
 !outputs/reports/*.gif
 *.duckdb
+CLAUDE.md
+.claude/
