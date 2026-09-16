@@ -15,23 +15,27 @@ from matplotlib.animation import FuncAnimation
 import numpy as np
 import polars as pl
 
-from src.ingest import COLUMNS, bucket_trades
+from src.ingest import COLUMNS, bucket_trades, day_file
 from src.features import compute_bucket_features
 
 REPORTS_DIR = Path("outputs/reports")
 N_FRAMES = 45
+REFERENCE_SYMBOL = "BTCUSDT"
+REFERENCE_DAY = "2026-08-25"
 
 
 def load_real_features() -> tuple:
+    # day_file resuelve el archivo en cualquiera de los dos layouts de datos y,
+    # si no esta descargado, indica el comando exacto para bajarlo.
     one_day = pl.read_csv(
-        "data/raw_btc/BTCUSDT-aggTrades-2026-08-25.csv",
+        day_file(REFERENCE_SYMBOL, REFERENCE_DAY),
         has_header=False,
         new_columns=COLUMNS,
     )
     one_day = one_day.with_columns(
         (pl.col("timestamp_us") // 1_000).alias("timestamp_ms"),
-        pl.lit("2026-08-25").alias("day"),
-        pl.lit("BTCUSDT").alias("symbol"),
+        pl.lit(REFERENCE_DAY).alias("day"),
+        pl.lit(REFERENCE_SYMBOL).alias("symbol"),
     )
     bucketed = bucket_trades(one_day)
     features = compute_bucket_features(bucketed).to_pandas()

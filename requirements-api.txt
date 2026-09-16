@@ -1,0 +1,15 @@
+# Dependencias de runtime de la API (etapa final del Dockerfile).
+#
+# Deliberadamente NO incluye torch, optuna, jupyter, matplotlib ni polars: son
+# del pipeline de investigacion, se usan en la etapa builder, y en runtime solo
+# harian la imagen mas grande. La API carga un LightGBM con joblib y responde.
+#
+# scikit-learn es necesario porque el modelo se serializo con la API sklearn de
+# LightGBM (LGBMRegressor), no con el Booster nativo.
+numpy>=1.26.0
+scikit-learn>=1.4.0
+lightgbm>=4.3.0
+joblib>=1.3.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.0

@@ -11,18 +11,21 @@ from pathlib import Path
 
 import polars as pl
 
-from src.ingest import COLUMNS, bucket_trades
+from src.ingest import COLUMNS, bucket_trades, day_file
 from src.features import compute_bucket_features
 
 ROOT = Path(__file__).resolve().parent.parent
 GO_DIR = ROOT / "go"
+REFERENCE_SYMBOL = "BTCUSDT"
 REFERENCE_DAY = "2026-08-25"
 
 
 def main() -> None:
-    print(f"[1/2] Cargando trades reales BTCUSDT del {REFERENCE_DAY}...")
+    print(f"[1/2] Cargando trades reales {REFERENCE_SYMBOL} del {REFERENCE_DAY}...")
+    # day_file resuelve el archivo en cualquiera de los dos layouts de datos y,
+    # si no esta descargado, indica el comando exacto para bajarlo.
     trades = pl.read_csv(
-        ROOT / "data" / "raw_btc" / f"BTCUSDT-aggTrades-{REFERENCE_DAY}.csv",
+        day_file(REFERENCE_SYMBOL, REFERENCE_DAY),
         has_header=False,
         new_columns=COLUMNS,
     )
